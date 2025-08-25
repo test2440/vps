@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<title>تسجيل الدخول</title>
+<body class="min-h-screen bg-gray-900 text-gray-100 grid place-items-center">
+  <form method="post" class="bg-gray-800 p-6 rounded-xl w-full max-w-sm space-y-4 shadow-lg">
+    <h1 class="text-xl font-bold">لوحة تحكم الـ VPS</h1>
+    {% if error %}<div class="text-red-400">{{ error }}</div>{% endif %}
+    <input name="password" type="password" placeholder="كلمة السر" class="w-full p-3 rounded bg-gray-900 border border-gray-700" />
+    <button class="w-full py-3 rounded bg-green-500 font-bold text-gray-900">دخول</button>
+  </form>
+</body>
+</html>
