@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<title>VPS File Manager & Runner</title>
+<body class="bg-gray-900 text-gray-100">
+  <header class="sticky top-0 z-10 bg-gray-900/80 backdrop-blur border-b border-gray-800">
+    <div class="max-w-6xl mx-auto p-4 flex items-center gap-3">
+      <div class="w-9 h-9 rounded bg-gradient-to-tr from-green-400 to-indigo-400 grid place-items-center">⚙️</div>
+      <div class="font-bold">VPS Manager</div>
+      <div class="ml-auto">
+        <a href="/logout" class="text-sm text-red-300">خروج</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto p-4 grid md:grid-cols-2 gap-4">
+    <!-- مدير الملفات -->
+    <section class="bg-gray-800 rounded-xl p-4 space-y-3">
+      <div class="flex items-center gap-2">
+        <div class="font-bold">الملفات</div>
+        <div id="cwd" class="text-xs text-gray-400"></div>
+        <div class="ml-auto flex gap-2">
+          <input id="folderName" placeholder="اسم مجلد" class="p-2 bg-gray-900 border border-gray-700 rounded"/>
+          <button onclick="mkdir()" class="px-3 py-2 bg-gray-700 rounded">مجلد جديد</button>
+          <label class="px-3 py-2 bg-gray-700 rounded cursor-pointer">
+            رفع ملفات
+            <input type="file" id="files" multiple class="hidden" onchange="upload()" />
+          </label>
+        </div>
+      </div>
+      <ul id="list" class="divide-y divide-gray-700"></ul>
+    </section>
+
+    <!-- تشغيل الأوامر / السجلات -->
+    <section class="bg-gray-800 rounded-xl p-4 space-y-3">
+      <div class="font-bold">تشغيل أوامر</div>
+      <div class="flex gap-2">
+        <input id="cmd" placeholder="مثال: python bot.py" class="flex-1 p-2 bg-gray-900 border border-gray-700 rounded"/>
+        <button onclick="run()" class="px-3 py-2 bg-green-500 text-gray-900 font-bold rounded">تشغيل</button>
+      </div>
+      <div class="text-sm text-gray-400">اختصارات: <button class="underline" onclick="setCmd('pip install -r requirements.txt')">pip install</button> • <button class="underline" onclick="setCmd('npm install')">npm install</button></div>
+      <pre id="log" class="bg-black/70 p-3 rounded h-80 overflow-auto"></pre>
+      <div class="flex gap-2">
+        <button id="killBtn" class="px-3 py-2 bg-red-500/80 rounded hidden" onclick="killProc()">إيقاف العملية</button>
+      </div>
+    </section>
+
+    <!-- قوالب سريعة -->
+    <section class="bg-gray-800 rounded-xl p-4 space-y-3 md:col-span-2">
+      <div class="font-bold">قوالب مشاريع سريعة</div>
+      <div class="flex gap-3 flex-wrap">
+        <button class="px-3 py-2 bg-gray-700 rounded" onclick="scaffold('telegram-bot')">بوت تيليجرام (Python)</button>
+        <button class="px-3 py-2 bg-gray-700 rounded" onclick="scaffold('static-site')">موقع ساكن</button>
+        <button class="px-3 py-2 bg-gray-700 rounded" onclick="scaffold('flask-app')">Flask App</button>
+      </div>
+      <div id="scafMsg" class="text-green-300 text-sm"></div>
+    </section>
+  </main>
+
+  <script>
+    let currentPath = '';
+    let currentPid = null;
+
+    function joinPath(a,b){ if(!a) return b||''; if(!b) return a; return (a.replace(/\/+$/,'') + '/' + b.replace(/^\//,'')); }
+
+    async function list(path=''){
+      const params = new URLSearchParams({ path });
+      const r = await fetch('/api/list?'+params.toString());
+      if(!r.ok) { alert('فشل قراءة القائمة'); return; }
+      const data = await r.json();
+      currentPath = data.cwd;
+      document.getElementById('cwd').textContent = data.cwd || '/';
+      const ul = document.getElementById('list'); ul.innerHTML='';
+
+      // إضافة رابط للرجوع للأعلى
+      if(data.cwd){
+        const li = document.createElement('li');
+        li.className = 'p-2 hover:bg-gray-700/50 cursor-pointer';
+        li.textContent = '.. /';
+        li.onclick = ()=> list(data.cwd.split('/').slice(0,-1).join('/'));
+        ul.appendChild(li);
+      }
+
+      for(const it of data.items){
+        const li = document.createElement('li');
+        li.className = 'p-2 flex items-center gap-2 hover:bg-gray-700/30';
+        const name = document.createElement('span');
+        name.textContent = it.name + (it.is_dir? ' /' : '');
+        name.className = 'flex-1 cursor-pointer';
+        name.onclick = ()=> it.is_dir ? list(joinPath(data.cwd,it.name)) : edit(joinPath(data.cwd,it.name));
+
+        const dl = document.createElement('a');
+        dl.textContent = 'تحميل'; dl.className='text-xs underline';
+        dl.href = '/api/download?path=' + encodeURIComponent(joinPath(data.cwd,it.name));
+        dl.onclick = (e)=> { e.stopPropagation(); };
+
+        const del = document.createElement('button');
+        del.textContent = 'حذف'; del.className='text-xs text-red-300';
+        del.onclick = async (e)=>{ e.stopPropagation(); if(confirm('حذف؟')){ await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path: joinPath(data.cwd,it.name)})}); list(currentPath); } };
+
+        li.appendChild(name); li.appendChild(dl); li.appendChild(del);
+        ul.appendChild(li);
+      }
+    }
+
+    async function mkdir(){
+      const name = document.getElementById('folderName').value.trim();
+      if(!name) return;
+      await fetch('/api/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path: currentPath, name})});
+      document.getElementById('folderName').value='';
+      list(currentPath);
+    }
+
+    async function upload(){
+      const inp = document.getElementById('files');
+      const fd = new FormData();
+      for(const f of inp.files) fd.append('files', f);
+      fd.append('path', currentPath);
+      await fetch('/api/upload',{method:'POST', body: fd});
+      inp.value='';
+      list(currentPath);
+    }
+
+    async function edit(path){
+      // إذا الملف قابل للتحرير
+      const r = await fetch('/api/edit?path='+encodeURIComponent(path));
+      if(!r.ok){
+        if(confirm('ملف غير قابل للتحرير أو كبير. تحميل بدلاً من ذلك؟')){
+          location.href='/api/download?path='+encodeURIComponent(path);
+        }
+        return;
+      }
+      const data = await r.json();
+      const content = prompt('تعديل المحتوى:\n(يفضل محرر خارجي لاحقًا)', data.content);
+      if(content===null) return;
+      await fetch('/api/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path, content})});
+      alert('تم الحفظ.');
+    }
+
+    function setCmd(v){ document.getElementById('cmd').value = v; }
+
+    async function run(){
+      const cmd = document.getElementById('cmd').value.trim(); if(!cmd) return;
+      const r = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd, cwd: currentPath})});
+      if(!r.ok){ alert('فشل بدء العملية'); return; }
+      const { pid } = await r.json();
+      currentPid = pid;
+      document.getElementById('killBtn').classList.remove('hidden');
+      const logEl = document.getElementById('log'); logEl.textContent='';
+      const es = new EventSource('/api/proc/'+pid+'/stream');
+      es.onmessage = (ev)=>{
+        try{ const data = JSON.parse(ev.data);
+          if(data.line){ logEl.textContent += data.line + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+          if(data.done){ logEl.textContent += `\n== انتهت العملية (code ${data.code}) ==\n`; es.close(); document.getElementById('killBtn').classList.add('hidden'); }
+        }catch{ logEl.textContent += ev.data + "\n"; }
+      };
+      es.onerror = ()=>{ es.close(); };
+    }
+
+    async function killProc(){ if(!currentPid) return; await fetch('/api/proc/'+currentPid+'/kill',{method:'POST'}); }
+
+    async function scaffold(kind){
+      const r = await fetch('/api/scaffold',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind, path: currentPath})});
+      const data = await r.json();
+      document.getElementById('scafMsg').textContent = data.message || 'تم.';
+      list(currentPath);
+    }
